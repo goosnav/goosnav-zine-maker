@@ -17,8 +17,7 @@ def main():
         "folder",
         nargs="?",
         type=Path,
-        default=Path.cwd(),
-        help="source folder (default: working directory)",
+        help="folder to open immediately (default: choose in the editor)",
     )
     parser.add_argument(
         "--output",
@@ -42,7 +41,9 @@ def main():
         help="local port (default: automatically selected)",
     )
     args = parser.parse_args()
-    project = Project(args.folder, args.output)
+    project = None
+    if args.folder or args.export or args.output:
+        project = Project(args.folder or Path.cwd(), args.output)
     if args.export:
         for warning in project.warnings:
             print(warning, file=sys.stderr)

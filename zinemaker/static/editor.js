@@ -56,8 +56,8 @@ function post(action, values = {}) {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Issue-Session": token },
     body: JSON.stringify({
-      project: issue.id,
-      revision: issue.revision,
+      project: issue?.id,
+      revision: issue?.revision,
       ...values,
     }),
   });
@@ -65,7 +65,7 @@ function post(action, values = {}) {
 async function working(label, fn) {
   if (busy) return;
   busy = true;
-  let status = "Saved locally";
+  let status;
   note("");
   $("status").textContent = label;
   if ($("dialog-error")) $("dialog-error").textContent = "";
@@ -84,17 +84,18 @@ async function working(label, fn) {
     document.querySelector(".toolbar").inert = false;
     $("dialog-body").inert = false;
     $("close").disabled = false;
-    $("status").textContent = status;
+    $("status").textContent = status || (issue ? "Saved locally" : "Ready");
   }
 }
 function adopt(data) {
-  issue = data;
   if (data.token) token = data.token;
+  issue = data.id ? data : null;
+  if (!issue) return;
   if (issue.warnings.length) note(issue.warnings.join("\n"));
   selected = Math.min(selected, Math.max(0, issue.pages.length - 1));
 }
 function current() {
-  return issue.pages[selected];
+  return issue?.pages[selected];
 }
 function itemFor(page) {
   return page && issue.items.find((i) => i.id === page.id);
@@ -123,6 +124,7 @@ function focusItem(id) {
 }
 async function mutate(action, payload, focus) {
   await working("Saving…", async () => {
+    if (!(await ensureIssue())) return;
     const previousIds = new Set(issue.items.map((i) => i.id));
     adopt(await post(action, payload));
     $("dialog").close();
@@ -144,6 +146,18 @@ function property(label, value) {
 function render() {
   const page = current(),
     item = itemFor(page);
+  $("empty-open").hidden = !!issue;
+  $("empty-add").hidden = !issue;
+  $("empty-hint").textContent = issue
+    ? "Drop comic images here or add an essay."
+    : "Open a comics folder or start with an essay.";
+  $("rescan").disabled = !issue;
+  if (!issue) {
+    $("empty").hidden = false;
+    for (const id of ["prev", "next", "up", "down", "export"])
+      $(id).disabled = true;
+    return;
+  }
   $("issue-title").textContent = issue.title;
   $("trim").textContent = issue.width + " × " + issue.height + " in";
   $("count").textContent = String(issue.pages.length);
@@ -316,7 +330,12 @@ function essayDialog(item) {
   );
   $("title").value = item?.title || "";
   $("body").value = item?.body || "";
-  actions(item ? "Save essay" : "Add essay", () =>
+  const saveLabel = item
+    ? "Save essay"
+    : issue
+      ? "Add essay"
+      : "Choose folder & save essay…";
+  actions(saveLabel, () =>
     mutate(
       item ? "item" : "essay",
       { id: item?.id, title: $("title").value, body: $("body").value },
@@ -439,6 +458,15 @@ function removeDialog(item) {
     item.title +
     "” from this issue? The original file stays in your folder.";
   actions("Remove item", () => mutate("remove", { id: item.id }));
+}
+// Called from an editor action only. Cancelling keeps the draft dialog open.
+async function ensureIssue() {
+  if (issue) return true;
+  const folder = await post("pick");
+  if (!folder.key) return false;
+  adopt(await post("open", { source: folder.key }));
+  render();
+  return true;
 }
 function openDialog() {
   modal(
@@ -566,6 +594,7 @@ async function upload(fileList) {
   if (!files.length) return;
   await working("Importing files…", async () => {
     const errors = [];
+    if (!(await ensureIssue())) return;
     const wasEmpty = !issue.pages.length;
     for (const [index, file] of files.entries()) {
       $("status").textContent =
@@ -618,10 +647,16 @@ function move(delta) {
 }
 $("prev").onclick = () => pickIndex(selected - 1);
 $("next").onclick = () => pickIndex(selected + 1);
-$("setup").onclick = setupDialog;
+$("setup").onclick = () => {
+  if (issue) setupDialog();
+  else
+    working("Opening issue…", async () => {
+      if (await ensureIssue()) setupDialog();
+    });
+};
 $("essay").onclick = () => essayDialog();
 $("export").onclick = exportDialog;
-$("open").onclick = openDialog;
+$("empty-open").onclick = $("open").onclick = openDialog;
 $("rescan").onclick = () =>
   working("Scanning folder…", async () => {
     const before = issue.items.length;

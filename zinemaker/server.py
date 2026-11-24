@@ -61,11 +61,17 @@ def choose_folder():
 
 class Desk:
     def __init__(self, project):
-        self.project = project
+        self._project = project
         self.token = secrets.token_urlsafe(32)
         self.folders = {}
         self.jobs = {}
         self.guard = threading.RLock()
+
+    @property
+    def project(self):
+        if self._project is None:
+            raise ValueError("Open an issue folder in the editor first.")
+        return self._project
 
     def snapshot(self):
         with self.guard, self.project.lock:
@@ -73,7 +79,10 @@ class Desk:
             return self.project, copy.deepcopy(self.project.data)
 
     def state(self):
-        project, issue = self.snapshot()
+        with self.guard:
+            if self._project is None:
+                return {"id": None}
+            project, issue = self.snapshot()
         pages = paginate(issue)
         summary = [
             {k: v for k, v in i.items() if k not in ("asset",)} for i in issue["items"]
@@ -322,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
             if action == "open":
                 source = desk.folders[p["source"]]
                 dest = desk.folders[p["destination"]] if p.get("destination") else None
-                desk.project = Project(source, dest)
+                desk._project = Project(source, dest)
                 desk.page.cache_clear()
                 desk.source_image.cache_clear()
             elif action in {"scan", "settings", "essay", "move", "remove", "item"}:
@@ -336,7 +345,10 @@ def serve(project, port=0, browser=True):
     with ThreadingHTTPServer(("127.0.0.1", port), Handler) as server:
         server.desk = Desk(project)
         url = f"http://127.0.0.1:{server.server_port}"
-        print(f"{url}\nIssue folder: {project.root}\nPress Ctrl+C to quit.", flush=True)
+        print(url, flush=True)
+        if project:
+            print(f"Issue folder: {project.root}")
+        print("Press Ctrl+C to quit.", flush=True)
         if browser:
             webbrowser.open(url)
         try:

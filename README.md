@@ -4,7 +4,7 @@ Choose a folder of comics, review the assembled issue, and export it for print o
 
 ## Make an issue
 
-1. On macOS, double-click **run.command** and select your comics folder. On Windows, open **run.cmd** and use **Open folder…** in the editor. The first launch installs the required packages using uv or Python 3.11 or later and needs internet access.
+1. On macOS, double-click **run.command**. On Windows, open **run.cmd**. The editor opens first. Choose **Open folder…** inside it to select comics and an optional output location. You can also choose **Add essay…** and start typing immediately. When you save your first essay, select the folder for the issue. The packaged macOS download includes its runtime. Launching from source requires uv or Python 3.11 or later and an internet connection for initial setup.
 2. The editor sorts comics by filename, finds the artwork on each scan, centers it, and builds a cover from the folder name and first comic. The default trim is **8.5 × 5.5 inches**, the size of the supplied Goosnav issues.
 3. Select **Issue setup…** to change the title, trim, comic borders, cover, or page numbering. Choose 9 × 6, 6 × 9, US Letter, or enter a custom width and height from 3 to 24 inches.
 4. Choose **Export issue… → Generate editions**. Use **Show export folder** to collect the results. Each export creates a new folder, so you can keep earlier proofs.
@@ -52,13 +52,13 @@ Back up the entire **Goosnav Zine** folder to preserve the editable issue. Open 
 
 ## Run from a terminal
 
-From the directory holding your comics, call the launcher by its path. It uses your current directory as the source and output base.
+Run the launcher from any directory to open the GUI. The editor reads the comics folder you select inside it.
 
 ```sh
 /path/to/goosnav-zine-maker/run.sh
 ```
 
-Provide paths to choose a source and destination, or add `--export` for a one-command build.
+Pass a comics folder (or `.` for the current directory) to open an issue immediately. Add `--export` for a one-command build. Running `--export` alone uses the current directory.
 
 ```sh
 ./run.sh "/path/to/comics" --output "/path/to/winter-issue"
@@ -66,6 +66,10 @@ Provide paths to choose a source and destination, or add `--export` for a one-co
 ```
 
 On Windows use `run.cmd` with the same arguments. Linux’s in-editor folder picker uses Tk. Passing a folder path works without a graphical picker.
+
+## macOS download
+
+Run `uv run --frozen --group packaging python scripts/package_macos.py` on the target Mac to build its self-contained ZIP in `dist/`. Extract the ZIP, then double-click **run.command**.
 
 ## Verification
 
