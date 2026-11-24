@@ -1,0 +1,41 @@
+# Keep local work, input media and exports private, even if launched in this checkout.
+.DS_Store
+references/
+Goosnav Zine/
+.zine-maker*/
+exports/
+dist/
+build/
+.venv/
+venv/
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.env*
+*.egg-info/
+*.log
+*.[pP][dD][fF]
+*.[pP][sS][dDbB]
+*.[pP][nN][gG]
+*.[jJ][pP][gG]
+*.[jJ][pP][eE][gG]
+*.[tT][iI][fF]*
+*.[wW][eE][bB][pP]
+*.[gG][iI][fF]
+*.[bB][mM][pP]
+*.heic
+*.HEIC
+*.zip
+*.tar*
+*.mov
+*.mp4
+# Small, curated print ornaments are application assets.
+!/zinemaker/art/corner-*.png
+.ruff_cache/
+*.[aA][fF][pP][hH][oO][tT][oO]
+*.[kK][rR][aA]
+*.[cC][lL][iI][pP]
+*.[cC][bB][zZ]
+*.[eE][pP][uU][bB]

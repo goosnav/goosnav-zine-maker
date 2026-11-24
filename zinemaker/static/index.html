@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Goosnav Zine Maker</title>
+    <link rel="icon" href="/mark.svg" />
+    <link rel="stylesheet" href="/editor.css" />
+    <script src="/editor.js" defer></script>
+  </head>
+  <body>
+    <header class="titlebar">
+      <img src="/mark.svg" width="23" height="24" alt="" />
+      <h1>Goosnav Zine Maker</h1>
+      <button id="help" aria-label="Help">?</button>
+    </header>
+    <nav class="toolbar" aria-label="Magazine tools">
+      <button id="open">
+        <i class="folder-icon" aria-hidden="true"></i>Open folder…
+      </button>
+      <button id="add"><b aria-hidden="true">＋</b>Add files…</button>
+      <button id="essay"><b aria-hidden="true">¶</b>Add essay…</button>
+      <span class="divider"></span><button id="setup">Issue setup…</button>
+      <button id="export" class="primary end" disabled>Export issue…</button>
+      <input
+        hidden
+        multiple
+        type="file"
+        id="files"
+        accept=".jpg,.jpeg,.png,.tif,.tiff,.webp,.bmp,.gif,.txt,.md"
+      />
+    </nav>
+    <main>
+      <aside class="side" aria-label="Page list">
+        <div class="group">
+          <div class="group-head">
+            <h2>Issue pages</h2>
+            <span id="count">0</span>
+          </div>
+          <ol id="pages"></ol>
+          <p id="no-pages">Your pages appear here.</p>
+          <div class="list-tools">
+            <button
+              id="up"
+              title="Move item earlier"
+              aria-label="Move item earlier"
+            >
+              ▲</button
+            ><button
+              id="down"
+              title="Move item later"
+              aria-label="Move item later"
+            >
+              ▼</button
+            ><button
+              id="rescan"
+              title="Import new files from the comics folder"
+            >
+              Rescan folder
+            </button>
+          </div>
+        </div>
+      </aside>
+      <section class="workspace" aria-label="Page preview">
+        <div class="sheetbar">
+          <h2 id="issue-title">Magazine</h2>
+          <span id="trim"></span>
+        </div>
+        <div class="pasteboard" id="drop">
+          <div id="empty" hidden>
+            <div class="empty-sheet">
+              <div class="empty-inside">
+                <h2>Start an issue</h2>
+                <p>Drop comic images here or open a folder.</p>
+                <button id="empty-add">Add files…</button>
+              </div>
+            </div>
+          </div>
+          <img id="preview" alt="Selected magazine page" hidden />
+          <p id="preview-status" role="status"></p>
+        </div>
+        <div class="pager">
+          <button id="prev" aria-label="Previous page">◀</button
+          ><span id="position">No pages</span
+          ><button id="next" aria-label="Next page">▶</button>
+        </div>
+      </section>
+      <aside class="inspector" aria-label="Page properties">
+        <div class="group-head"><h2>Page properties</h2></div>
+        <div id="properties"></div>
+      </aside>
+    </main>
+    <footer>
+      <span id="status" role="status">Opening issue…</span
+      ><span id="location"></span>
+    </footer>
+    <div id="alert" role="alert" hidden></div>
+    <dialog id="dialog">
+      <div class="titlebar">
+        <h2 id="dialog-title"></h2>
+        <button id="close" aria-label="Close dialog">×</button>
+      </div>
+      <div id="dialog-body"></div>
+      <div id="export-monitor" hidden>
+        <span id="export-progress" role="status"></span
+        ><button id="stop-export">Cancel export</button>
+      </div>
+    </dialog>
+  </body>
+</html>
