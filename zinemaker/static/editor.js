@@ -242,6 +242,8 @@ function render() {
         item.name || item.title,
       ),
     );
+    if (["cover", "back"].includes(item.role))
+      pane.append(button("Cover assistant…", () => coverAssistant(item), true));
     if (item.size)
       pane.append(
         property("Original size", item.size.join(" × ") + " px"),
@@ -259,7 +261,7 @@ function render() {
       button(
         item.role === "essay" ? "Edit essay…" : "Edit artwork…",
         () => (item.role === "essay" ? essayDialog(item) : artworkDialog(item)),
-        true,
+        !["cover", "back"].includes(item.role),
       ),
       button("Remove from issue…", () => removeDialog(item)),
     );
@@ -587,7 +589,7 @@ function exportDialog() {
   );
   $("dialog-body").append(bar);
 }
-async function upload(fileList) {
+async function upload(fileList, asCover = false) {
   const files = Array.from(fileList).sort((a, b) =>
     a.name.localeCompare(b.name, undefined, { numeric: true }),
   );
@@ -596,6 +598,7 @@ async function upload(fileList) {
     const errors = [];
     if (!(await ensureIssue())) return;
     const wasEmpty = !issue.pages.length;
+    let coverId;
     for (const [index, file] of files.entries()) {
       $("status").textContent =
         "Importing " + (index + 1) + " of " + files.length + "…";
@@ -604,26 +607,34 @@ async function upload(fileList) {
         revision: String(issue.revision),
         project: issue.id,
       });
+      if (asCover) params.set("role", "cover");
       try {
-        adopt(
-          await request("/api/upload?" + params, {
-            method: "POST",
-            headers: { "X-Issue-Session": token },
-            body: file,
-          }),
-        );
+        const data = await request("/api/upload?" + params, {
+          method: "POST",
+          headers: { "X-Issue-Session": token },
+          body: file,
+        });
+        adopt(data);
+        if (asCover) coverId = data.imported_id;
       } catch (err) {
         errors.push(file.name + " — " + err.message);
       }
     }
     if (wasEmpty) selected = 0;
+    if (coverId) focusItem(coverId);
     latestExport = null;
     render();
     note(errors.join("\n"));
+    if (coverId) coverAssistant(itemFor(current()));
     $("files").value = "";
   });
 }
 $("add").onclick = $("empty-add").onclick = () => $("files").click();
+$("add-cover").onclick = () => {
+  $("cover-file").value = "";
+  $("cover-file").click();
+};
+$("cover-file").onchange = () => upload($("cover-file").files, true);
 $("files").onchange = () => upload($("files").files);
 $("drop").ondragover = (e) => {
   e.preventDefault();

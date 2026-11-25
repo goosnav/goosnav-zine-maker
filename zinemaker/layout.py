@@ -13,6 +13,7 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.lib.utils import simpleSplit
 
+from .cover import draw_cover
 from .images import open_image, region
 
 ART = Path(__file__).with_name("art")
@@ -128,6 +129,11 @@ def draw_art(c, project, item, box, dpi, full=False):
         )
         left, top = (im.width - cw) // 2, (im.height - ch) // 2
         im = im.crop((left, top, left + cw, top + ch))
+    draw_image(c, im, box, dpi)
+
+
+def draw_image(c, im, box, dpi):
+    x, y, w, h = box
     scale = min(w / im.width, h / im.height)
     dw, dh = im.width * scale, im.height * scale
     im.thumbnail(
@@ -226,6 +232,8 @@ def draw(c, project, issue, page, index, dpi):
         draw_art(
             c, project, item, (side, vertical, w - 2 * side, h - 2 * vertical), dpi
         )
+    elif kind in {"cover", "back"} and item.get("cover_design"):
+        draw_cover(c, project, item, item["cover_design"], (w, h), dpi, draw_image)
     else:
         draw_art(c, project, item, (0, 0, w, h), dpi, full=True)
     if kind in {"comic", "essay"} and issue["numbers"]:

@@ -7,6 +7,8 @@
     <link rel="icon" href="/mark.svg" />
     <link rel="stylesheet" href="/editor.css" />
     <script src="/editor.js" defer></script>
+    <script src="/palettes.js" defer></script>
+    <script src="/cover.js" defer></script>
   </head>
   <body>
     <header class="titlebar">
@@ -19,6 +21,13 @@
         <i class="folder-icon" aria-hidden="true"></i>Open folder…
       </button>
       <button id="add"><b aria-hidden="true">＋</b>Add files…</button>
+      <button id="add-cover">Add cover…</button>
+      <input
+        type="file"
+        id="cover-file"
+        accept=".jpg,.jpeg,.png,.tif,.tiff,.webp,.bmp,.gif"
+        hidden
+      />
       <button id="essay"><b aria-hidden="true">¶</b>Add essay…</button>
       <span class="divider"></span><button id="setup">Issue setup…</button>
       <button id="export" class="primary end" disabled>Export issue…</button>
@@ -71,7 +80,9 @@
             <div class="empty-sheet">
               <div class="empty-inside">
                 <h2>Start an issue</h2>
-                <p id="empty-hint">Open a comics folder or start with an essay.</p>
+                <p id="empty-hint">
+                  Open a comics folder or start with an essay.
+                </p>
                 <button id="empty-open" class="primary">Open folder…</button>
                 <button id="empty-add" hidden>Add files…</button>
               </div>

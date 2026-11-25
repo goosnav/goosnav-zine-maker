@@ -11,6 +11,16 @@ Choose a folder of comics, review the assembled issue, and export it for print o
 
 You can also drag files into the preview. Use **Edit artwork…** to draw a crop, enter crop percentages, rotate the art, or switch between centered artwork, the entire scan, and a filled frame. Select a page and use the arrows under the list to change the reading order. **Edit essay…** changes the title and body of an essay. Edits take effect when you click **Apply edits** or **Save**.
 
+## Design a cover
+
+Choose **Add cover…** and select an image with any filename. The cover assistant opens with a proof at the issue’s trim size. You can also select an existing front or back cover and click **Cover assistant…**.
+
+- Choose one of 36 named palettes, including combinations inspired by the Goosnav covers. For new combinations, select a mood and click a four-color suggestion. **More suggestions** gives three more. Suggestions use the artwork’s dominant colors when available.
+- Under **Border**, choose **Solid band** or **Two bands** and set the width as a percentage of the shorter page edge. The palette supplies the colors. To override one, select a swatch and click the corresponding band button. **Fill inside border** crops the artwork to fill the frame. **Show entire crop** keeps all of the selected artwork visible.
+- **Apply palette wash** tones the artwork with the palette. Expand **Artwork color** to adjust wash strength, saturation, and contrast independently.
+- Pick a palette color, a color sampled from the original, or a familiar print swatch. Click the proof to fill a connected region with **Paint bucket**. **Replace color** affects matching pixels throughout the artwork. Increase tolerance for uneven scanned color. Use **Fit page / Zoom** for small areas. The process-color swatches are RGB approximations.
+- **Undo**, **Redo**, and **Cancel** let you try changes. **Save cover** stores the settings and paint edits with the issue. Reopen the assistant to revise them or remove the last paint edit. All three exported editions use the saved design and the original file stays intact.
+
 ## Source folder
 
 A flat folder of images is enough. Zine Maker reads JPEG, PNG, TIFF, WebP, BMP and GIF images, using the first frame of a multiframe file. UTF-8 TXT and Markdown files become plain-text essays. Each file can be up to 256 MiB, each image up to 100 megapixels, and each essay up to 150,000 characters.

@@ -1,6 +1,6 @@
 [project]
 name = "goosnav-zine-maker"
-version = "0.1.1"
+version = "0.2.0"
 description = "A local comic magazine editor with print and digital editions"
 requires-python = ">=3.11"
 dependencies = ["pillow>=11.3,<13", "reportlab>=4.4,<5", "pypdfium2>=4.30,<6", "filelock>=3.16,<4"]

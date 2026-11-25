@@ -21,9 +21,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from filelock import Timeout
+from .cover import placement, recipe, source_swatches
 from .export import publish
 from .images import open_image
-from .layout import paginate, preview
+from .layout import dimensions, paginate, preview
 from .project import Conflict, MAX_FILE, Project
 
 STATIC = Path(__file__).with_name("static")
@@ -126,7 +127,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
-    def reply(self, content, mime="application/json", status=200):
+    def reply(self, content, mime="application/json", status=200, headers=None):
         if mime == "application/json":
             content = json.dumps(content).encode()
         self.send_response(status)
@@ -137,8 +138,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'",
+            "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'",
         )
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(content)
 
@@ -219,7 +222,14 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             with target.open("rb") as f:
                 shutil.copyfileobj(f, self.wfile)
-        elif path in ("/", "/editor.css", "/editor.js", "/mark.svg"):
+        elif path in (
+            "/",
+            "/editor.css",
+            "/editor.js",
+            "/cover.js",
+            "/palettes.js",
+            "/mark.svg",
+        ):
             self.file(STATIC / ("index.html" if path == "/" else path[1:]))
         elif path == "/favicon.ico":
             self.reply(b"", "image/x-icon", 204)
@@ -252,10 +262,10 @@ class Handler(BaseHTTPRequestHandler):
                     raise
             try:
                 with desk.guard:
-                    desk.project.update(
+                    added = desk.project.update(
                         "upload", {**q, "revision": int(q["revision"]), "path": tmp}
                     )
-                    self.reply(desk.state())
+                    self.reply({**desk.state(), "imported_id": added})
             finally:
                 tmp.unlink(missing_ok=True)
             return
@@ -266,6 +276,39 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("Invalid editor request.")
         p = json.loads(self.rfile.read(length))
         action = path.removeprefix("/api/")
+        if action in {"cover-proof", "cover-swatches"}:
+            project, issue = desk.snapshot()
+            if (
+                p.get("project") != issue["id"]
+                or p.get("revision") != issue["revision"]
+            ):
+                raise Conflict("The issue changed. Reopen the cover assistant.")
+            item = next(
+                (
+                    i
+                    for i in issue["items"]
+                    if i["id"] == p.get("id") and i["role"] in {"cover", "back"}
+                ),
+                None,
+            )
+            if not item:
+                raise ValueError("Select a front or back cover.")
+            if action == "cover-swatches":
+                self.reply({"colors": source_swatches(project.asset(item))})
+                return
+            design = recipe(p["design"])
+            item["cover_design"] = design
+            w, h = dimensions(issue)
+            (x, y, dw, dh), crop, _ = placement(item, design, (w, h))
+            mapping = {
+                "bounds": [x / w, y / h, dw / w, dh / h],
+                "crop": crop,
+                "size": item["size"],
+                "rotate": item["rotate"],
+            }
+            proof = preview(project, issue, {"kind": item["role"], "item": item}, 0)
+            self.reply(proof, "image/jpeg", headers={"X-Art-Map": json.dumps(mapping)})
+            return
         if action == "pick":
             picked = choose_folder()
             key = secrets.token_urlsafe(12)
@@ -334,7 +377,15 @@ class Handler(BaseHTTPRequestHandler):
                 desk._project = Project(source, dest)
                 desk.page.cache_clear()
                 desk.source_image.cache_clear()
-            elif action in {"scan", "settings", "essay", "move", "remove", "item"}:
+            elif action in {
+                "scan",
+                "settings",
+                "essay",
+                "move",
+                "remove",
+                "item",
+                "cover-design",
+            }:
                 desk.project.update(action, p)
             else:
                 raise ValueError("Unknown command.")

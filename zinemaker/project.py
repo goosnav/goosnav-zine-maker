@@ -13,6 +13,7 @@ from pathlib import Path
 
 from PIL.Image import DecompressionBombError
 from filelock import FileLock
+from .cover import recipe
 from .images import IMAGE_EXT, auto_crop, open_image
 
 FOLDER = "Goosnav Zine"
@@ -334,8 +335,9 @@ class Project:
             ):
                 raise Conflict("This issue changed. Reload the editor before saving.")
             self.warnings = []
-            self.edit(action, payload)
+            result = self.edit(action, payload)
             self.save()
+            return result
 
     def edit(self, action, p):
         items = self.data["items"]
@@ -365,13 +367,43 @@ class Project:
             }
             self.data["items"] = insert_items(items, [essay])
         elif action == "upload":
+            if (
+                p.get("role") == "cover"
+                and Path(p["name"]).suffix.lower() not in IMAGE_EXT
+            ):
+                raise ValueError("Choose a cover image.")
             item = self.add(p["path"], p["name"], p["name"])
-            self.data["items"] = insert_items(items[:-1], [item])
+            if p.get("role") == "cover":
+                # Reopen the same cover with its edits; interior pages keep their roles.
+                prior = next(
+                    (
+                        old
+                        for old in items[:-1]
+                        if old["name"] == item["name"]
+                        and old.get("asset") == item["asset"]
+                        and old["role"] == "cover"
+                    ),
+                    None,
+                )
+                items.pop()
+                if prior:
+                    items.remove(prior)
+                    self.data["seen"].pop()
+                    item = prior
+                item["role"] = "cover"
+                items.insert(0, item)
+            else:
+                self.data["items"] = insert_items(items[:-1], [item])
+            return item["id"]
         else:
             item = next((i for i in items if i["id"] == p.get("id")), None)
             if item is None:
                 raise ValueError("Select an item in the page list.")
-            if action == "move":
+            if action == "cover-design":
+                if item["role"] not in {"cover", "back"}:
+                    raise ValueError("Select a front or back cover.")
+                item["cover_design"] = recipe(p["design"])
+            elif action == "move":
                 old = items.index(item)
                 new = p["index"]
                 if type(new) is not int or not 0 <= new < len(items):
