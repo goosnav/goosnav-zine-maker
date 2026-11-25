@@ -3,6 +3,7 @@
 import io
 from contextlib import closing
 import math
+import re
 import threading
 from pathlib import Path
 
@@ -13,10 +14,17 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.lib.utils import simpleSplit
 
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+from .panels import comic_pages, arrange_group
 from .cover import draw_cover
 from .images import open_image, region
 
 ART = Path(__file__).with_name("art")
+pdfmetrics.registerFont(
+    TTFont("GoosnavBlackletter", str(ART / "UnifrakturMaguntia-Book.ttf"))
+)
 PDF_LOCK = threading.RLock()  # PDFium is process-global and not thread safe.
 PAPER = (0.981, 0.969, 0.926)
 INK = (0.105, 0.105, 0.093)
@@ -49,27 +57,102 @@ def wrap(text, face, size, width):
     return lines
 
 
+def opening_lines(body, width, size, initial, inset):
+    """Indent just the first three lines around the initial, then restore column width."""
+    if not initial:
+        return wrap(body, "Times-Roman", size, width)
+    result = []
+    for paragraph in body.strip().expandtabs(4).split("\n"):
+        remaining = paragraph.strip()
+        prefix = ""
+        if not result:
+            remaining = remaining[1:]
+            prefix = initial + (" " if remaining.startswith(" ") else "")
+            remaining = remaining.lstrip()
+        if not remaining:
+            result.append(prefix)
+            continue
+        while remaining and len(result) < 3:
+            words = []
+            consumed = 0
+            for match in re.finditer(r"\S+", remaining):
+                word = match.group()
+                if (
+                    stringWidth(" ".join([*words, word]), "Times-Roman", size)
+                    > width - inset
+                ):
+                    if not words:
+                        word = wrap(word, "Times-Roman", size, width - inset)[0]
+                        words.append(word)
+                        consumed = match.start() + len(word)
+                    break
+                words.append(word)
+                consumed = match.end()
+            result.append(prefix + " ".join(words))
+            prefix = ""
+            remaining = remaining[consumed:].lstrip()
+        if remaining:
+            result.extend(wrap(remaining, "Times-Roman", size, width))
+    return result
+
+
 def essay_pages(issue, item):
     w, h = dimensions(issue)
     pad = max(17, min(w, h) * 0.085)
-    cols = 2 if w >= 470 and w / h > 1.08 else 1
+    size = item.get("font_size") or max(9, min(12, min(w, h) * 0.029))
+    cols = 2 if w >= 360 and (w - 2 * pad - 18) / 2 >= 6 * size else 1
     gap = 18
     width = (w - 2 * pad - gap * (cols - 1)) / cols
-    size = max(9, min(12, min(w, h) * 0.029))
     leading = size * 1.38
     heading = min(25, w * 0.06)
     titles = wrap(item["title"], "Times-Bold", heading, w - 2 * pad)
-    # Keep even very long titles above the first column on small trim sizes.
     while len(titles) * heading * 1.12 > h * 0.33 and heading > 9:
         heading -= 1
         titles = wrap(item["title"], "Times-Bold", heading, w - 2 * pad)
-    lines = wrap(item["body"], "Times-Roman", size, width)
+    initial = item["body"].strip()[:1] if item.get("drop_cap", True) else ""
+    if initial and not initial.isalpha():
+        initial = ""
+    cap_size = min(3.1 * size, width * 0.46)
+    inset = stringWidth(initial, "GoosnavBlackletter", cap_size) + 3 if initial else 0
+    lines = opening_lines(item["body"], width, size, initial, inset)
     pages, offset = [], 0
     while offset < len(lines):
-        header = titles if not pages else []
+        first = not pages
+        header = titles if first else []
         top = h - pad - len(header) * heading * 1.12 - (14 if header else 0)
         rows = max(1, math.floor((top - pad) / leading))
-        end = offset + rows * cols
+        capacities = [rows] * cols
+        illustration = None
+        if first and item.get("illustration"):
+            height = (top - pad) * item.get("image_height", 38) / 100
+            col = 0 if item.get("image_side") == "left" else cols - 1
+            iw = width * item.get("image_width", 100) / 100
+            illustration = (
+                pad + col * (width + gap) + (width - iw) / 2,
+                pad,
+                iw,
+                height,
+            )
+            capacities[col] = max(0, math.floor((top - pad - height - 6) / leading))
+        # A small trim with a large font may leave the first page for art/title.
+        count = min(sum(capacities), len(lines) - offset)
+        lengths = capacities[:]
+        if cols == 2:
+            lengths[0] = min(
+                capacities[0],
+                max(
+                    min(3, count) if first and initial else 0,
+                    math.ceil(count / 2),
+                    count - capacities[1],
+                ),
+            )
+        positions = []
+        for column, capacity in enumerate(lengths):
+            for row in range(min(capacity, count - len(positions))):
+                shift = inset if first and column == 0 and row < 3 else 0
+                positions.append(
+                    (pad + column * (width + gap) + shift, top - (row + 1) * leading)
+                )
         pages.append(
             dict(
                 item=item,
@@ -81,13 +164,15 @@ def essay_pages(issue, item):
                 pad=pad,
                 size=size,
                 leading=leading,
-                gap=gap,
                 width=width,
-                rows=rows,
-                lines=lines[offset:end],
+                positions=positions,
+                initial=initial if first else "",
+                cap_size=cap_size,
+                illustration=illustration,
+                lines=lines[offset : offset + count],
             )
         )
-        offset = end
+        offset += count
     return pages
 
 
@@ -100,6 +185,10 @@ def paginate(issue):
     for item in items:
         if item["role"] == "essay":
             pages.extend(essay_pages(issue, item))
+        elif item["role"] == "comic":
+            if item.get("layout") == "spread" and len(pages) % 2 == 0:
+                pages.append({"kind": "alignment", "item": item})
+            pages.extend(comic_pages(issue, item))
         else:
             pages.append({"kind": item["role"], "item": item})
     return pages
@@ -218,13 +307,45 @@ def draw(c, project, issue, page, index, dpi):
             c.setLineWidth(0.55)
             c.line(p["pad"], y - 5, w - p["pad"], y - 5)
         c.setFont("Times-Roman", p["size"])
-        for n, line in enumerate(p["lines"]):
-            column, row = divmod(n, p["rows"])
-            c.drawString(
-                p["pad"] + column * (p["width"] + p["gap"]),
-                p["top"] - (row + 1) * p["leading"],
-                line,
+        for n, (line, (x, y)) in enumerate(zip(p["lines"], p["positions"])):
+            if n == 0 and p["initial"]:
+                c.setFont("GoosnavBlackletter", p["cap_size"])
+                c.drawString(
+                    p["pad"], y + p["size"] * 0.7 - p["cap_size"] * 0.7, p["initial"]
+                )
+                c.setFont("Times-Roman", p["size"])
+                line = line[1:]
+            c.drawString(x, y, line)
+        if p["illustration"]:
+            x, y, width, height = p["illustration"]
+            source = open_image(
+                project.asset({"asset": item["illustration"], "title": item["title"]})
             )
+            # Use an aspect-preserving crop with an editable focal point.
+            ratio = (
+                width / height
+                if item.get("image_fit") == "fill"
+                else source.width / source.height
+            )
+            zoom = item.get("image_zoom", 100) / 100
+            cw = max(1, round(min(source.width, source.height * ratio) / zoom))
+            ch = max(1, round(min(source.height, source.width / ratio) / zoom))
+            left = round((source.width - cw) * item.get("image_x", 50) / 100)
+            top = round((source.height - ch) * item.get("image_y", 50) / 100)
+            draw_image(
+                c,
+                source.crop((left, top, left + cw, top + ch)),
+                (x, y, width, height),
+                dpi,
+            )
+    elif kind == "alignment":
+        pass  # A facing spread starts on the even (left-hand) printed page.
+    elif kind == "comic" and "half" in page:
+        draw_art(c, project, item, (-page["half"] * w, 0, 2 * w, h), dpi)
+    elif kind == "comic" and page.get("group"):
+        source = open_image(project.asset(item))
+        for crop, box in arrange_group(page["group"], item["size"], (w, h)):
+            draw_image(c, region(source, crop), box, dpi)
     elif kind == "comic":
         comic_frame(c, w, h, issue["style"], index)
         side = min(w, h) * (0.11 if issue["style"] == "ornamental" else 0.065)
@@ -236,7 +357,12 @@ def draw(c, project, issue, page, index, dpi):
         draw_cover(c, project, item, item["cover_design"], (w, h), dpi, draw_image)
     else:
         draw_art(c, project, item, (0, 0, w, h), dpi, full=True)
-    if kind in {"comic", "essay"} and issue["numbers"]:
+    if (
+        kind in {"comic", "essay"}
+        and issue["numbers"]
+        and not page.get("group")
+        and "half" not in page
+    ):
         c.setFillColorRGB(*INK)
         c.setFont("Times-Roman", max(8, min(13, min(w, h) * 0.034)))
         c.drawCentredString(w / 2, min(w, h) * 0.047, str(index + 1))

@@ -21,22 +21,27 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from filelock import Timeout
+from .archive import save_project, open_project
 from .cover import placement, recipe, source_swatches
+from .essay_proofs import possible_proofs
 from .export import publish
 from .images import open_image
+from .panels import analyze
 from .layout import dimensions, paginate, preview
 from .project import Conflict, MAX_FILE, Project
 
 STATIC = Path(__file__).with_name("static")
 
 
-def choose_folder():
+def choose_folder(project_file=False):
     if platform.system() == "Darwin":
         result = subprocess.run(
             [
                 "osascript",
                 "-e",
-                'POSIX path of (choose folder with prompt "Choose a folder for Goosnav Zine Maker")',
+                'POSIX path of (choose file with prompt "Open a saved Goosnav project")'
+                if project_file
+                else 'POSIX path of (choose folder with prompt "Choose a folder for Goosnav Zine Maker")',
             ],
             capture_output=True,
             text=True,
@@ -50,6 +55,11 @@ def choose_folder():
         "import tkinter as tk; from tkinter import filedialog; "
         "root=tk.Tk(); root.withdraw(); print(filedialog.askdirectory(parent=root)); root.destroy()"
     )
+    if project_file:
+        script = script.replace(
+            "askdirectory(parent=root)",
+            "askopenfilename(parent=root, filetypes=[('Zine project','*.gsnvzine')])",
+        )
     result = subprocess.run(
         [sys.executable, "-c", script], text=True, capture_output=True
     )
@@ -102,6 +112,7 @@ class Desk:
             "source": str(project.source),
             "folder": str(project.root),
             "warnings": project.warnings,
+            "essay_proofs": possible_proofs(project, issue["items"]),
         }
 
     @functools.lru_cache(maxsize=20)
@@ -228,6 +239,7 @@ class Handler(BaseHTTPRequestHandler):
             "/editor.js",
             "/cover.js",
             "/palettes.js",
+            "/panels.js",
             "/mark.svg",
         ):
             self.file(STATIC / ("index.html" if path == "/" else path[1:]))
@@ -239,7 +251,7 @@ class Handler(BaseHTTPRequestHandler):
     def change(self, path, q):
         desk = self.server.desk
         length = int(self.headers.get("Content-Length", "0"))
-        if path == "/api/upload":
+        if path in {"/api/upload", "/api/illustration"}:
             if not 0 < length <= MAX_FILE:
                 raise ValueError("Choose a nonempty file under 256 MiB.")
             name = q["name"]
@@ -262,6 +274,14 @@ class Handler(BaseHTTPRequestHandler):
                     raise
             try:
                 with desk.guard:
+                    if path == "/api/illustration":
+                        if desk.project.data["id"] != q["project"]:
+                            raise Conflict("Reopen the essay in the current project.")
+                        target, _ = desk.project.store_image(
+                            tmp, Path(name).suffix.lower()
+                        )
+                        self.reply({"asset": target.name})
+                        return
                     added = desk.project.update(
                         "upload", {**q, "revision": int(q["revision"]), "path": tmp}
                     )
@@ -276,6 +296,26 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("Invalid editor request.")
         p = json.loads(self.rfile.read(length))
         action = path.removeprefix("/api/")
+        if action == "find-panels":
+            project, issue = desk.snapshot()
+            if (p.get("project"), p.get("revision")) != (
+                issue["id"],
+                issue["revision"],
+            ):
+                raise Conflict("Reopen the current comic.")
+            item = next(
+                (
+                    i
+                    for i in issue["items"]
+                    if i["id"] == p.get("id") and i["role"] == "comic"
+                ),
+                None,
+            )
+            if not item or p.get("method") not in ("border", "gutter"):
+                raise ValueError("Choose a comic and a detection method.")
+            boxes, _ = analyze(open_image(project.asset(item)), p["method"])
+            self.reply({"boxes": boxes})
+            return
         if action in {"cover-proof", "cover-swatches"}:
             project, issue = desk.snapshot()
             if (
@@ -308,6 +348,26 @@ class Handler(BaseHTTPRequestHandler):
             }
             proof = preview(project, issue, {"kind": item["role"], "item": item}, 0)
             self.reply(proof, "image/jpeg", headers={"X-Art-Map": json.dumps(mapping)})
+            return
+        if action == "save-project":
+            project, issue = desk.snapshot()
+            if (p.get("project"), p.get("revision")) != (
+                issue["id"],
+                issue["revision"],
+            ):
+                raise Conflict("Reload the issue before saving a snapshot.")
+            self.reply({"path": str(save_project(project, issue))})
+            return
+        if action == "open-project":
+            picked = choose_folder(project_file=True)
+            if not picked:
+                self.reply({"cancelled": True})
+                return
+            with desk.guard:
+                desk._project = open_project(picked)
+                desk.page.cache_clear()
+                desk.source_image.cache_clear()
+                self.reply(desk.state())
             return
         if action == "pick":
             picked = choose_folder()

@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/editor.css" />
     <script src="/editor.js" defer></script>
     <script src="/palettes.js" defer></script>
+    <script src="/panels.js" defer></script>
     <script src="/cover.js" defer></script>
   </head>
   <body>
@@ -20,6 +21,8 @@
       <button id="open">
         <i class="folder-icon" aria-hidden="true"></i>Open folder…
       </button>
+      <button id="open-project">Open project…</button>
+      <button id="save-project" disabled>Save project file</button>
       <button id="add"><b aria-hidden="true">＋</b>Add files…</button>
       <button id="add-cover">Add cover…</button>
       <input
@@ -46,6 +49,9 @@
             <h2>Issue pages</h2>
             <span id="count">0</span>
           </div>
+          <button id="review-proof" hidden>
+            Review possible duplicate essay…
+          </button>
           <ol id="pages"></ol>
           <p id="no-pages">Your pages appear here.</p>
           <div class="list-tools">

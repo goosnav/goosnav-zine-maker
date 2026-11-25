@@ -1,6 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const roles = {
+  alignment: "Blank before facing spread",
   generated: "Automatic cover",
   comic: "Comic",
   essay: "Essay",
@@ -101,14 +102,17 @@ function itemFor(page) {
   return page && issue.items.find((i) => i.id === page.id);
 }
 function pageName(page) {
+  if (page.kind === "alignment") return "Spread alignment";
   return page.kind === "generated" ? issue.title : itemFor(page).title;
 }
 function pickIndex(index) {
+  const listFocused = $("pages").contains(document.activeElement);
   selected = index;
   render();
   const list = $("pages"),
     row = list.children[index];
   if (row) {
+    if (listFocused) row.firstElementChild.focus({ preventScroll: true });
     const top =
       row.getBoundingClientRect().top - list.getBoundingClientRect().top;
     if (top < 0) list.scrollTop += top;
@@ -118,22 +122,16 @@ function pickIndex(index) {
 }
 function focusItem(id) {
   const pos = issue.pages.findIndex(
-    (p) => p.kind !== "generated" && p.id === id,
+    (p) => p.kind !== "generated" && p.kind !== "alignment" && p.id === id,
   );
   if (pos >= 0) selected = pos;
 }
 async function mutate(action, payload, focus) {
   await working("Saving…", async () => {
     if (!(await ensureIssue())) return;
-    const previousIds = new Set(issue.items.map((i) => i.id));
     adopt(await post(action, payload));
     $("dialog").close();
-    if (focus)
-      focusItem(
-        focus === "last"
-          ? issue.items.find((i) => !previousIds.has(i.id)).id
-          : focus,
-      );
+    if (focus) focusItem(focus);
     latestExport = null;
     render();
   });
@@ -146,11 +144,20 @@ function property(label, value) {
 function render() {
   const page = current(),
     item = itemFor(page);
+  const proofIds = Object.keys(issue?.essay_proofs || {});
+  $("review-proof").hidden = !proofIds.length;
+  $("review-proof").onclick = () => {
+    const index = issue.pages.findIndex(
+      (p) => p.kind === "comic" && p.id === proofIds[0],
+    );
+    if (index >= 0) pickIndex(index);
+  };
   $("empty-open").hidden = !!issue;
   $("empty-add").hidden = !issue;
   $("empty-hint").textContent = issue
     ? "Drop comic images here or add an essay."
     : "Open a comics folder or start with an essay.";
+  $("save-project").disabled = !issue;
   $("rescan").disabled = !issue;
   if (!issue) {
     $("empty").hidden = false;
@@ -186,7 +193,9 @@ function render() {
   $("next").disabled = !page || selected === issue.pages.length - 1;
   $("export").disabled = !page;
   const order =
-    item && page.kind !== "generated" ? issue.items.indexOf(item) : -1;
+    item && !["generated", "alignment"].includes(page.kind)
+      ? issue.items.indexOf(item)
+      : -1;
   $("up").disabled = order < 1;
   $("down").disabled = order < 0 || order === issue.items.length - 1;
   $("position").textContent = page
@@ -229,6 +238,16 @@ function render() {
     return;
   }
   pane.append(el("h3", roles[page.kind]));
+  if (page.kind === "alignment") {
+    pane.append(
+      el(
+        "p",
+        "This blank places the next comic on facing left and right pages.",
+      ),
+      button("Panel layout…", () => panelDialog(item)),
+    );
+    return;
+  }
   if (page.kind === "generated") {
     pane.append(
       property("Title", issue.title),
@@ -244,6 +263,17 @@ function render() {
     );
     if (["cover", "back"].includes(item.role))
       pane.append(button("Cover assistant…", () => coverAssistant(item), true));
+    if (issue.essay_proofs?.[item.id])
+      pane.append(
+        el(
+          "p",
+          "This image appears to repeat the essay “" +
+            issue.essay_proofs[item.id] +
+            "”. Review the page, then use Remove from issue to keep just the editable essay.",
+        ),
+      );
+    if (item.role === "comic")
+      pane.append(button("Panel layout…", () => panelDialog(item)));
     if (item.size)
       pane.append(
         property("Original size", item.size.join(" × ") + " px"),
@@ -328,21 +358,90 @@ function setupDialog() {
 function essayDialog(item) {
   modal(
     item ? "Edit essay" : "Add essay",
-    '<label>Essay title<input id="title" maxlength="160"></label><label>Essay text<textarea id="body" rows="10" maxlength="150000"></textarea></label><p class="subtle">Text flows across as many pages as it needs.</p>',
+    `
+    <label>Essay title<input id="title" maxlength="160"></label>
+    <label>Essay text<textarea id="body" rows="7" maxlength="150000"></textarea></label>
+    <div class="pair"><label>Text size (pt)<input id="essay-size" type="number" min="7" max="24" step=".5" placeholder="Automatic"></label>
+    <label class="check"><input id="drop-cap" type="checkbox">Blackletter initial</label></div>
+    <fieldset><legend>Illustration</legend>
+    <input type="file" id="essay-image" aria-label="Choose illustration" accept=".jpg,.jpeg,.png,.tif,.tiff,.webp,.bmp,.gif">
+    <div id="essay-image-tools">
+    <div class="pair"><label>Position<select id="image-side"><option value="right">Bottom right</option><option value="left">Bottom left</option></select></label>
+    <label>Framing<select id="image-fit"><option value="contain">Show whole drawing</option><option value="fill">Crop to fill</option></select></label></div>
+    <div class="pair"><label>Column width (%)<input id="image-width" type="number" min="10" max="100"></label>
+    <label>Column height (%)<input id="image-height" type="number" min="10" max="70"></label></div>
+    <div class="pair"><label>Zoom (%)<input id="image-zoom" type="number" min="100" max="250"></label>
+    <label>Horizontal focus<input id="image-x" type="range" min="0" max="100"></label>
+    <label>Vertical focus<input id="image-y" type="range" min="0" max="100"></label></div>
+    <button id="remove-illustration">Remove illustration</button></div></fieldset>`,
   );
   $("title").value = item?.title || "";
   $("body").value = item?.body || "";
+  $("essay-size").value = item?.font_size || "";
+  $("drop-cap").checked = item?.drop_cap ?? true;
+  let illustration = item?.illustration || null;
+  const file = $("essay-image");
+  function syncImage() {
+    $("essay-image-tools").hidden = !illustration && !file.files.length;
+  }
+  file.onchange = syncImage;
+  $("remove-illustration").onclick = () => {
+    illustration = null;
+    file.value = "";
+    syncImage();
+  };
+  syncImage();
+  for (const [key, fallback] of Object.entries({
+    side: "right",
+    fit: "contain",
+    width: 100,
+    height: 38,
+    zoom: 100,
+    x: 50,
+    y: 50,
+  })) {
+    $("image-" + key).value = item?.["image_" + key] ?? fallback;
+  }
   const saveLabel = item
     ? "Save essay"
     : issue
       ? "Add essay"
       : "Choose folder & save essay…";
   actions(saveLabel, () =>
-    mutate(
-      item ? "item" : "essay",
-      { id: item?.id, title: $("title").value, body: $("body").value },
-      item?.id || "last",
-    ),
+    working("Saving essay…", async () => {
+      for (const input of $("dialog-body").querySelectorAll("input"))
+        if (!input.reportValidity()) return;
+      if (!(await ensureIssue())) return;
+      if (file.files.length) {
+        const image = file.files[0];
+        const q = new URLSearchParams({ name: image.name, project: issue.id });
+        illustration = (
+          await request("/api/illustration?" + q, {
+            method: "POST",
+            headers: { "X-Issue-Session": token },
+            body: image,
+          })
+        ).asset;
+      }
+      const payload = {
+        id: item?.id,
+        title: $("title").value,
+        body: $("body").value,
+        illustration,
+        font_size: $("essay-size").valueAsNumber || null,
+        drop_cap: $("drop-cap").checked,
+        image_side: $("image-side").value,
+        image_fit: $("image-fit").value,
+      };
+      for (const key of ["width", "height", "zoom", "x", "y"])
+        payload["image_" + key] = +$("image-" + key).value;
+      const ids = new Set(issue.items.map((i) => i.id));
+      adopt(await post(item ? "item" : "essay", payload));
+      focusItem(item?.id || issue.items.find((i) => !ids.has(i.id)).id);
+      latestExport = null;
+      $("dialog").close();
+      render();
+    }),
   );
 }
 function artworkDialog(item) {
@@ -470,6 +569,25 @@ async function ensureIssue() {
   render();
   return true;
 }
+$("save-project").onclick = () =>
+  working("Saving project file…", async () => {
+    const result = await post("save-project");
+    modal(
+      "Project file saved",
+      '<p>Your editable issue and its original artwork are saved together.</p><p class="path" id="saved-project-path"></p>',
+    );
+    $("saved-project-path").textContent = result.path;
+    $("dialog-body").append(button("Done", () => $("dialog").close(), true));
+  });
+$("open-project").onclick = () =>
+  working("Opening project file…", async () => {
+    const data = await post("open-project");
+    if (data.cancelled) return;
+    adopt(data);
+    selected = 0;
+    latestExport = null;
+    render();
+  });
 function openDialog() {
   modal(
     "Open comics folder",
@@ -701,11 +819,16 @@ document.addEventListener("keydown", (e) => {
     e.ctrlKey
   )
     return;
-  if (e.key === "ArrowLeft" && selected > 0) {
+  if (e.target.closest?.("input,textarea,select,[contenteditable=true]"))
+    return;
+  if (["ArrowUp", "ArrowLeft"].includes(e.key) && selected > 0) {
     e.preventDefault();
     pickIndex(selected - 1);
   }
-  if (e.key === "ArrowRight" && selected < issue.pages.length - 1) {
+  if (
+    ["ArrowDown", "ArrowRight"].includes(e.key) &&
+    selected < issue.pages.length - 1
+  ) {
     e.preventDefault();
     pickIndex(selected + 1);
   }

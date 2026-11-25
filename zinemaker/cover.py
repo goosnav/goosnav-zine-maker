@@ -1,8 +1,10 @@
 """Editable cover color recipes, continuous page borders, and source-space paint."""
 
+import json
 import math
+import numpy as np
 import re
-from PIL import Image, ImageChops, ImageEnhance, ImageOps
+from PIL import Image, ImageChops, ImageEnhance, ImageOps, ImageDraw
 
 from .images import open_image
 
@@ -10,6 +12,11 @@ DEFAULT = {
     "border": "none",
     "fit": "inherit",
     "width": 4,
+    "keyline": 0,
+    "zoom": 100,
+    "focus_x": 50,
+    "focus_y": 50,
+    "filter": "original",
     "frame": "#F9C62D",
     "stripe": "#222020",
     "palette": ["#222020", "#B54035", "#F9C62D", "#FAF1DB"],
@@ -41,7 +48,7 @@ def recipe(value):
     if not isinstance(value, dict):
         raise ValueError("Invalid cover settings.")
     d = {**DEFAULT, **value}
-    if d["fit"] not in ("inherit", "contain", "fill"):
+    if d["fit"] not in ("inherit", "contain", "fill", "extend"):
         raise ValueError("Choose a cover fit.")
     if d["border"] not in ("none", "solid", "double"):
         raise ValueError("Choose a border style.")
@@ -51,8 +58,27 @@ def recipe(value):
         raise ValueError("A cover supports up to 64 paint edits.")
     if not isinstance(d["name"], str) or not 1 <= len(d["name"]) <= 80:
         raise ValueError("Invalid palette name.")
+    if d["filter"] not in ("original", "grayscale", "ink", "palette", "dither"):
+        raise ValueError("Choose an artwork filter.")
     fills = []
     for op in d["fills"]:
+        if op["mode"] == "brush":
+            points = op.get("points", [])
+            if (
+                not isinstance(points, list)
+                or not 1 <= len(points) <= 4096
+                or any(len(pt) != 2 for pt in points)
+            ):
+                raise ValueError("Invalid brush stroke.")
+            fills.append(
+                dict(
+                    mode="brush",
+                    color=color(op["color"]),
+                    width=bounded(op["width"], 0.1, 10),
+                    points=[[bounded(x, 0, 1), bounded(y, 0, 1)] for x, y in points],
+                )
+            )
+            continue
         if op["mode"] not in ("bucket", "replace"):
             raise ValueError("Choose a paint tool.")
         fills.append(
@@ -66,6 +92,11 @@ def recipe(value):
         )
     return dict(
         name=d["name"],
+        keyline=bounded(d["keyline"], 0, 6),
+        zoom=bounded(d["zoom"], 100, 300),
+        focus_x=bounded(d["focus_x"], 0, 100),
+        focus_y=bounded(d["focus_y"], 0, 100),
+        filter=d["filter"],
         fit=d["fit"],
         palette=[color(c) for c in d["palette"]],
         frame=color(d["frame"]),
@@ -84,6 +115,26 @@ def rgb(hexcolor):
 
 
 def paint(im, op):
+    if op["mode"] == "brush":
+        draw = ImageDraw.Draw(im)
+        width = max(1, round(min(im.size) * op["width"] / 100))
+        points = [
+            (
+                min(im.width - 1, round(x * im.width)),
+                min(im.height - 1, round(y * im.height)),
+            )
+            for x, y in op["points"]
+        ]
+        ink = rgb(op["color"])
+        if len(points) > 1:
+            draw.line(points, fill=ink, width=width, joint="curve")
+        for x, y in points:
+            start = width // 2
+            draw.ellipse(
+                (x - start, y - start, x - start + width - 1, y - start + width - 1),
+                fill=ink,
+            )
+        return
     x = min(im.width - 1, int(op["x"] * im.width))
     y = min(im.height - 1, int(op["y"] * im.height))
     seed = im.getpixel((x, y))
@@ -128,23 +179,24 @@ def connected(mask, x, y):
 
 def edited_image(path, design):
     if not (
-        design["wash"]
+        design.get("filter", "original") != "original"
+        or design["wash"]
         or design["fills"]
         or design["saturation"] != 100
         or design["contrast"] != 100
     ):
         return open_image(path)
-    operations = tuple(
-        tuple(op[k] for k in ("x", "y", "color", "tolerance", "mode"))
-        for op in design["fills"]
-    )
+    operations = tuple(json.dumps(op, sort_keys=True) for op in design["fills"])
     return paint_cache.render(
         path,
-        tuple(design["palette"]) if design["wash"] else (),
+        tuple(design["palette"])
+        if design["wash"] or design.get("filter") in ("palette", "dither")
+        else (),
         design["wash"],
         design["saturation"],
         design["contrast"],
         operations,
+        design.get("filter", "original"),
     )
 
 
@@ -154,8 +206,10 @@ class PaintCache:
     def __init__(self):
         self.last = None
 
-    def render(self, path, palette, wash, saturation, contrast, operations):
-        base = (path, palette, wash, saturation, contrast)
+    def render(
+        self, path, palette, wash, saturation, contrast, operations, filter_name
+    ):
+        base = (path, palette, wash, saturation, contrast, filter_name)
         previous = self.last
         start = 0
         if (
@@ -170,7 +224,7 @@ class PaintCache:
         else:
             image = adjust_colors(*base)
         for operation in operations[start:]:
-            paint(image, dict(zip(("x", "y", "color", "tolerance", "mode"), operation)))
+            paint(image, json.loads(operation))
         self.last = (base, operations, image)
         return image
 
@@ -178,7 +232,7 @@ class PaintCache:
 paint_cache = PaintCache()
 
 
-def adjust_colors(path, palette, wash, saturation, contrast):
+def adjust_colors(path, palette, wash, saturation, contrast, filter_name="original"):
     image = open_image(path)
     if saturation != 100:
         image = ImageEnhance.Color(image).enhance(saturation / 100)
@@ -199,6 +253,32 @@ def adjust_colors(path, palette, wash, saturation, contrast):
         tones = ImageOps.grayscale(image)
         tones.putpalette(table)
         image = Image.blend(image, tones.convert("RGB"), wash / 100)
+    if filter_name == "grayscale":
+        return ImageOps.grayscale(image).convert("RGB")
+    if filter_name == "ink":
+        return (
+            ImageOps.grayscale(image)
+            .point(lambda p: 255 if p >= 150 else 0)
+            .convert("RGB")
+        )
+    if filter_name == "dither":
+        table = Image.new("P", (1, 1))
+        table.putpalette(list(bytes.fromhex("".join(c[1:] for c in palette))) * 64)
+        return image.quantize(
+            palette=table, dither=Image.Dither.FLOYDSTEINBERG
+        ).convert("RGB")
+    if filter_name == "palette":
+        # GSNV Paint's nearest squared-RGB rule. Chunk to bound working memory.
+        colors = np.array([rgb(c) for c in palette], dtype=np.int32)
+        for top in range(0, image.height, 64):
+            box = (0, top, image.width, min(image.height, top + 64))
+            pixels = np.asarray(image.crop(box), dtype=np.int32)
+            distances = np.stack(
+                [np.sum((pixels - c) ** 2, axis=2) for c in colors], axis=2
+            )
+            image.paste(
+                Image.fromarray(colors[distances.argmin(axis=2)].astype(np.uint8)), box
+            )
     return image
 
 
@@ -221,15 +301,18 @@ def placement(item, design, page_size):
     fit = design.get("fit", "inherit")
     if fit == "inherit":
         fit = item["fit"]
+    cw, ch = sw, sh
     if fit == "fill":
         ratio = (w - 2 * margin) / (h - 2 * margin)
         if quarter:
             ratio = 1 / ratio
         cw, ch = min(sw, max(1, round(sh * ratio))), min(sh, max(1, round(sw / ratio)))
-        left += (sw - cw) // 2
-        top += (sh - ch) // 2
-        right, bottom = left + cw, top + ch
-        sw, sh = cw, ch
+    zoom = design.get("zoom", 100) / 100
+    cw, ch = max(1, round(cw / zoom)), max(1, round(ch / zoom))
+    left += round((sw - cw) * design.get("focus_x", 50) / 100)
+    top += round((sh - ch) * design.get("focus_y", 50) / 100)
+    right, bottom = left + cw, top + ch
+    sw, sh = cw, ch
     if quarter:
         sw, sh = sh, sw
     scale = min((w - 2 * margin) / sw, (h - 2 * margin) / sh)
@@ -259,7 +342,33 @@ def draw_cover(canvas, project, item, design, page_size, dpi, draw_image):
                 270: Image.Transpose.ROTATE_90,
             }[item["rotate"]]
         )
+    if design.get("fit") == "extend":
+        # Mirror the edge color at each scanline to preserve edge lettering.
+        from reportlab.lib.utils import ImageReader
+
+        if x - margin > 0.01:
+            for start, col in ((margin, 0), (x + dw, img.width - 1)):
+                canvas.drawImage(
+                    ImageReader(img.crop((col, 0, col + 1, img.height))),
+                    start,
+                    h - y - dh,
+                    x - margin,
+                    dh,
+                )
+        if y - margin > 0.01:
+            for start, row in ((margin, img.height - 1), (h - y, 0)):
+                canvas.drawImage(
+                    ImageReader(img.crop((0, row, img.width, row + 1))),
+                    x,
+                    start,
+                    dw,
+                    y - margin,
+                )
     draw_image(canvas, img, (x, h - y - dh, dw, dh), dpi)
+    if margin and design.get("keyline", 0):
+        canvas.setLineWidth(design["keyline"])
+        canvas.setStrokeColorRGB(0, 0, 0)
+        canvas.rect(margin, margin, w - 2 * margin, h - 2 * margin, fill=0, stroke=1)
 
 
 def source_swatches(path):

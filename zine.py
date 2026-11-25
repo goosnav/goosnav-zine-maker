@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from zinemaker.archive import open_project
 from zinemaker.export import publish
 from zinemaker.project import Project
 from zinemaker.server import serve
@@ -43,7 +44,10 @@ def main():
     args = parser.parse_args()
     project = None
     if args.folder or args.export or args.output:
-        project = Project(args.folder or Path.cwd(), args.output)
+        if args.folder and args.folder.is_file():
+            project = open_project(args.folder, args.output)
+        else:
+            project = Project(args.folder or Path.cwd(), args.output)
     if args.export:
         for warning in project.warnings:
             print(warning, file=sys.stderr)

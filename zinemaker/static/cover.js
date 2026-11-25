@@ -3,7 +3,7 @@ function coverAssistant(item) {
   let design = structuredClone(
     item.cover_design || {
       border: "none",
-      fit: "inherit",
+      fit: "extend",
       width: 4,
       frame: "#F9C62D",
       stripe: "#222020",
@@ -15,6 +15,14 @@ function coverAssistant(item) {
       fills: [],
     },
   );
+  design = {
+    keyline: item.cover_design ? 0 : 1,
+    zoom: 100,
+    focus_x: 50,
+    focus_y: 50,
+    filter: "original",
+    ...design,
+  };
   let brush = design.palette[1],
     source = [],
     round = 0,
@@ -29,13 +37,13 @@ function coverAssistant(item) {
     "Cover assistant",
     `
     <div class="cover-desk">
-      <section class="cover-proof"><div class="proof-paper"><img id="cover-proof" alt="Cover proof. Click artwork to paint."></div>
+      <section class="cover-proof"><div class="proof-paper"><img id="cover-proof" draggable="false" alt="Cover proof. Click artwork to paint."></div>
       <span id="cover-state" role="status"></span>
       <div class="pair"><button id="cover-undo">Undo</button><button id="cover-redo">Redo</button><select aria-label="Cover zoom" id="cover-zoom"><option value="1">Fit page</option><option value="2">Zoom 2×</option><option value="3">Zoom 3×</option></select></div>
       <fieldset><legend>Paint</legend>
-      <label>Tool<select id="cover-tool"><option value="bucket">Paint bucket · touching pixels</option><option value="replace">Replace color · across artwork</option></select></label>
+      <label>Tool<select id="cover-tool"><option value="bucket">Paint bucket · touching pixels</option><option value="brush">Brush · drag to paint</option><option value="replace">Replace color · across artwork</option></select></label>
       <div class="pair"><label>Paint color<input id="cover-brush" type="color"></label>
-      <label>Tolerance (%)<input id="cover-tolerance" type="number" min="0" max="100" value="10"></label></div>
+      <label id="brush-width-label" hidden>Brush width (%)<input id="brush-width" type="number" step=".1" min=".1" max="10" value="1"></label><label id="tolerance-label">Tolerance (%)<input id="cover-tolerance" type="number" min="0" max="100" value="10"></label></div>
       <div><small>From the artwork</small><div id="sample-colors" class="color-row"></div></div>
       <div><small>Print swatches</small><div id="press-colors" class="color-row"></div></div>
       <button id="unpaint">Remove last paint edit</button>
@@ -51,8 +59,10 @@ function coverAssistant(item) {
       <div class="pair"><label>Style<select id="cover-border"><option value="none">None</option><option value="solid">Solid band</option><option value="double">Two bands</option></select></label>
       <label>Width (%)<input type="number" min="1" max="15" step=".5" id="cover-width"></label></div>
       <div class="pair"><button id="set-frame">Use swatch for outer band</button><button id="set-stripe">Use swatch for inner band</button></div>
-      <label>Artwork fit<select id="cover-fit"><option value="inherit">Use page framing</option><option value="contain">Show entire crop</option><option value="fill">Fill inside border</option></select></label></fieldset>
-      <details><summary>Artwork color</summary><div id="cover-adjustments"></div></details>
+      <label>Black inner line (pt)<input type="number" id="keyline" min="0" max="6" step=".25"></label><label>Artwork fit<select id="cover-fit"><option value="inherit">Use page framing</option><option value="contain">Show entire crop</option><option value="extend">Extend edge colors · keep full artwork</option><option value="fill">Fill inside border</option></select></label>
+      <label>Artwork zoom (%)<input id="art-zoom" type="range" min="100" max="300"></label>
+      <div class="pair"><label>Horizontal focus<input id="focus-x" type="range" min="0" max="100"></label><label>Vertical focus<input id="focus-y" type="range" min="0" max="100"></label></div></fieldset>
+      <details open><summary>Filters</summary><label>Artwork filter<select id="art-filter"><option value="original">Original color</option><option value="grayscale">Grayscale</option><option value="ink">Black ink</option><option value="palette">Match nearest palette color</option><option value="dither">Dither to palette</option></select></label><div id="cover-adjustments"></div></details>
 
       </section></div>`,
   );
@@ -187,6 +197,9 @@ function coverAssistant(item) {
     $("cover-adjustments").append(wrap);
   }
   function sync() {
+    for (const [id, key] of Object.entries(geometry)) $(id).value = design[key];
+    $("art-filter").value = design.filter;
+    $("keyline").disabled = design.border === "none";
     saved.textContent = design.name;
     lib.value = catalog.has(design.name) ? design.name : "";
     $("cover-fit").value = design.fit || "inherit";
@@ -278,7 +291,7 @@ function coverAssistant(item) {
     $("cover-state").textContent = "Rendering cover…";
     timer = setTimeout(() => proof(version), 100);
   }
-  image.onclick = (event) => {
+  function sourcePoint(event) {
     if (!mapping || design.fills.length >= 64) {
       if (mapping) message("This cover has reached 64 paint edits.");
       return;
@@ -295,18 +308,113 @@ function coverAssistant(item) {
     if (mapping.rotate === 180) [x, y] = [1 - x, 1 - y];
     if (mapping.rotate === 270) [x, y] = [1 - y, x];
     const [l, t, r, b] = mapping.crop;
-    const tol = $("cover-tolerance");
-    if (!tol.reportValidity() || !Number.isFinite(tol.valueAsNumber)) return;
-    edit(() =>
-      design.fills.push({
-        x: (l + x * (r - l)) / mapping.size[0],
-        y: (t + y * (b - t)) / mapping.size[1],
-        tolerance: tol.valueAsNumber,
-        mode: $("cover-tool").value,
-        color: brush,
-      }),
-    );
+    return [
+      (l + x * (r - l)) / mapping.size[0],
+      (t + y * (b - t)) / mapping.size[1],
+    ];
+  }
+  let stroke, overlay;
+  image.style.touchAction = "none";
+  $("cover-tool").onchange = () => {
+    const brushOn = $("cover-tool").value === "brush";
+    $("brush-width-label").hidden = !brushOn;
+    $("tolerance-label").hidden = brushOn;
   };
+  function addPoint(event) {
+    const point = sourcePoint(event);
+    if (!point || !stroke || stroke.points.length >= 4096) return;
+    stroke.points.push(point);
+    const rect = image.getBoundingClientRect();
+    const px = ((event.clientX - rect.left) / rect.width) * overlay.width;
+    const py = ((event.clientY - rect.top) / rect.height) * overlay.height;
+    const ctx = overlay.getContext("2d");
+    ctx.lineTo(px, py);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+  }
+  image.onpointerdown = (event) => {
+    if (event.button !== 0 || stroke) return;
+    const point = sourcePoint(event);
+    if (!point) return;
+    const mode = $("cover-tool").value;
+    if (mode !== "brush") {
+      const tol = $("cover-tolerance");
+      if (tol.reportValidity() && Number.isFinite(tol.valueAsNumber))
+        edit(() =>
+          design.fills.push({
+            x: point[0],
+            y: point[1],
+            tolerance: tol.valueAsNumber,
+            mode,
+            color: brush,
+          }),
+        );
+      return;
+    }
+    const width = $("brush-width");
+    if (!width.reportValidity() || !Number.isFinite(width.valueAsNumber))
+      return;
+    stroke = { mode, color: brush, width: width.valueAsNumber, points: [] };
+    image.setPointerCapture(event.pointerId);
+    const rect = image.getBoundingClientRect();
+    overlay = el("canvas");
+    overlay.width = Math.max(1, Math.round(rect.width));
+    overlay.height = Math.max(1, Math.round(rect.height));
+    Object.assign(overlay.style, {
+      position: "fixed",
+      pointerEvents: "none",
+      top: rect.top + "px",
+      left: rect.left + "px",
+    });
+    dialog.append(overlay);
+    const ctx = overlay.getContext("2d"),
+      crop = mapping.crop;
+    const sourceWidth =
+      mapping.rotate % 180 ? crop[3] - crop[1] : crop[2] - crop[0];
+    ctx.lineWidth = Math.max(
+      1,
+      (((Math.min(...mapping.size) * stroke.width) / 100) *
+        rect.width *
+        mapping.bounds[2]) /
+        sourceWidth,
+    );
+    ctx.strokeStyle = brush;
+    ctx.lineCap = "round";
+    addPoint(event);
+  };
+  image.onpointermove = (event) => {
+    if (stroke) addPoint(event);
+  };
+  function finishStroke(commit) {
+    if (!stroke) return;
+    const operation = stroke;
+    stroke = null;
+    overlay.remove();
+    if (commit && operation.points.length)
+      edit(() => design.fills.push(operation));
+  }
+  image.onpointerup = () => finishStroke(true);
+  image.onpointercancel = () => finishStroke(false);
+  dialog.addEventListener("close", () => finishStroke(false), { once: true });
+  const geometry = {
+    keyline: "keyline",
+    "art-zoom": "zoom",
+    "focus-x": "focus_x",
+    "focus-y": "focus_y",
+  };
+  for (const [id, key] of Object.entries(geometry)) {
+    $(id).onchange = (e) => {
+      if (e.target.reportValidity() && Number.isFinite(e.target.valueAsNumber))
+        edit(() => {
+          design[key] = e.target.valueAsNumber;
+        });
+    };
+  }
+  $("art-filter").onchange = (e) =>
+    edit(() => {
+      design.filter = e.target.value;
+    });
   $("cover-fit").onchange = (e) =>
     edit(() => {
       design.fit = e.target.value;
@@ -342,8 +450,13 @@ function coverAssistant(item) {
       edit(() => {
         design = {
           ...design,
+          keyline: 1,
+          zoom: 100,
+          focus_x: 50,
+          focus_y: 50,
+          filter: "original",
           border: "none",
-          fit: "inherit",
+          fit: "extend",
           wash: 0,
           saturation: 100,
           contrast: 100,

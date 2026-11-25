@@ -9,16 +9,30 @@ Choose a folder of comics, review the assembled issue, and export it for print o
 3. Select **Issue setup…** to change the title, trim, comic borders, cover, or page numbering. Choose 9 × 6, 6 × 9, US Letter, or enter a custom width and height from 3 to 24 inches.
 4. Choose **Export issue… → Generate editions**. Use **Show export folder** to collect the results. Each export creates a new folder, so you can keep earlier proofs.
 
-You can also drag files into the preview. Use **Edit artwork…** to draw a crop, enter crop percentages, rotate the art, or switch between centered artwork, the entire scan, and a filled frame. Select a page and use the arrows under the list to change the reading order. **Edit essay…** changes the title and body of an essay. Edits take effect when you click **Apply edits** or **Save**.
+You can also drag files into the preview. Use **Edit artwork…** to draw a crop, enter crop percentages, rotate the art, or switch between centered artwork, the entire scan, and a filled frame. Use the Up and Down keys to browse issue pages. The ▲ and ▼ buttons under the list move the selected comic or essay in the reading order. Edits take effect when you click **Apply edits** or **Save**.
+
+## Fit comics to the book
+
+Zine Maker uses Goosnav Comic Maker’s border detector and reading order. It analyzes a small copy of the scan and renders from the original artwork. Existing issues gain automatic panel layouts when opened. A custom whole-page crop, rotation, or framing choice takes precedence over automatic panel layout.
+
+Under **Panel layout…**, review up to ten numbered rectangles. **Automatic** keeps ordinary strips together and divides square grids or stacked panels across consecutive pages. Multi-page comics use plain pages with a small trim margin. Choose two pages, four pages, or one page per panel to control the reading pace. A comic with fewer panels uses fewer pages. To carry a single drawing across the binding, choose **Facing spread**. The editor inserts a blank page when needed to start the spread on the left.
+
+Choose **Find drawn borders** to detect the panels again, or **Find gaps between panels** for unframed drawings. Use **Add panel**, redraw a selected rectangle, or change its reading order before applying. Include any captions or credits you want to print inside the selected area.
+
+## Set an essay
+
+**Edit essay…** controls text size in points, the blackletter initial, and an optional illustration. Text flows down the first column, into the second, and onto continuation pages. Narrow trims use one column. The opening page reserves space for the drawing. Choose its side, width, height, framing, zoom, and focal point. The initial uses the bundled UnifrakturMaguntia font.
+
+Repeated imports of the same essay text produce one essay. If a scan resembles a typeset copy of an essay, **Review possible duplicate essay…** selects the image so you can inspect it and remove it from the issue. Removed source files stay on disk, and rescanning remembers your decision.
 
 ## Design a cover
 
 Choose **Add cover…** and select an image with any filename. The cover assistant opens with a proof at the issue’s trim size. You can also select an existing front or back cover and click **Cover assistant…**.
 
 - Choose one of 36 named palettes, including combinations inspired by the Goosnav covers. For new combinations, select a mood and click a four-color suggestion. **More suggestions** gives three more. Suggestions use the artwork’s dominant colors when available.
-- Under **Border**, choose **Solid band** or **Two bands** and set the width as a percentage of the shorter page edge. The palette supplies the colors. To override one, select a swatch and click the corresponding band button. **Fill inside border** crops the artwork to fill the frame. **Show entire crop** keeps all of the selected artwork visible.
-- **Apply palette wash** tones the artwork with the palette. Expand **Artwork color** to adjust wash strength, saturation, and contrast independently.
-- Pick a palette color, a color sampled from the original, or a familiar print swatch. Click the proof to fill a connected region with **Paint bucket**. **Replace color** affects matching pixels throughout the artwork. Increase tolerance for uneven scanned color. Use **Fit page / Zoom** for small areas. The process-color swatches are RGB approximations.
+- Under **Border**, choose **Solid band** or **Two bands** and set the width as a percentage of the shorter page edge. The palette supplies the colors. To override one, select a swatch and click the corresponding band button. **Fill inside border** crops the artwork to fill the frame. **Extend edge colors** fills leftover strips with the outermost pixels and preserves lettering near the edge. **Show entire crop** centers the image on white. Set **Black inner line** in points, or enter zero for a plain border. Artwork zoom and focus change the printed composition.
+- **Apply palette wash** tones the artwork with the palette. Under **Filters**, choose grayscale, black ink, nearest palette color, or Floyd–Steinberg dithering. Nearest palette color uses the selected four swatches. Wash strength, saturation, and contrast are independently adjustable.
+- Pick a palette color, a color sampled from the original, or a familiar print swatch. Click the proof to fill a connected region with **Paint bucket**. **Replace color** affects matching pixels throughout the artwork. Use **Brush** and drag to paint a stroke. Each stroke can be undone. Increase bucket tolerance for uneven scanned color. Use **Fit page / Zoom** for small areas. The process-color swatches are RGB approximations.
 - **Undo**, **Redo**, and **Cancel** let you try changes. **Save cover** stores the settings and paint edits with the issue. Reopen the assistant to revise them or remove the last paint edit. All three exported editions use the saved design and the original file stays intact.
 
 ## Source folder
@@ -40,7 +54,7 @@ Winter issue/
   back-cover.jpg
 ```
 
-On first scan, a supplied cover leads, essays flow across as many pages as necessary, and ads are spaced among the comics. A supplied back cover closes the issue. The scanner reads the top-level folder and the immediate contents of recognized folders, including Comic Maker’s `all-book-prints`. Paired Comic Maker PNG and TIFF book crops produce one page per comic. You can also open a folder of book prints directly. Name loose artwork `cover`, `back-cover`, or `ad-…` to assign its role during import. Use **Edit artwork…** to change it later.
+On first scan, a supplied cover leads, essays flow across as many pages as necessary, and ads are spaced among the comics. A supplied back cover closes the issue. The scanner reads the top-level folder and the immediate contents of recognized folders, including Comic Maker’s `all-book-prints`. Paired Comic Maker PNG and TIFF book crops are imported once per comic. You can also open a folder of book prints directly. Name loose artwork `cover`, `back-cover`, or `ad-…` to assign its role during import. Use **Edit artwork…** to change it later.
 
 Reopening the comics folder or choosing **Rescan folder** imports new filenames. Existing edits and removed-page decisions are preserved. To replace a previously imported scan, add the updated file with **Add files…**, then remove the old item.
 
@@ -58,7 +72,7 @@ All issue data is under **Goosnav Zine/** in the comics folder by default. To ch
 
 Print the PDF at **Actual size / 100%**. For a folded home booklet, use your PDF viewer’s booklet printing and a sheet size that fits the spread. The print file uses finished trim dimensions and has no added bleed or press marks. For online reading, upload the complete **website** folder to a static host or share **digital.pdf**. The web edition also opens directly from disk.
 
-Back up the entire **Goosnav Zine** folder to preserve the editable issue. Open this folder directly to resume a moved issue. Originals are read-only inputs. Processing and export work offline after setup. Close the terminal or press Ctrl+C to stop the editor.
+**Save project file** writes a dated **.gsnvzine** snapshot in the issue folder, including essay illustrations, source artwork, and edits. **Open project…** restores it into a fresh working folder beside the selected snapshot. The original working folder also saves each applied edit automatically. Back up that folder to preserve previous export runs as well. Open this folder directly to resume a moved issue. Originals are read-only inputs. Processing and export work offline after setup. Close the terminal or press Ctrl+C to stop the editor.
 
 ## Run from a terminal
 

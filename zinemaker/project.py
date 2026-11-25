@@ -13,6 +13,7 @@ from pathlib import Path
 
 from PIL.Image import DecompressionBombError
 from filelock import FileLock
+from .panels import analyze, bounds
 from .cover import recipe
 from .images import IMAGE_EXT, auto_crop, open_image
 
@@ -190,7 +191,23 @@ class Project:
                     raise ValueError(
                         "This destination holds another issue. Open its Goosnav Zine folder or choose a new destination."
                     )
-                if not direct and self.scan():
+                migration_warnings = []
+                migrated = False
+                for item in self.data["items"]:
+                    if item["role"] == "comic" and "panels" not in item:
+                        try:
+                            item["panels"], item["auto"] = analyze(
+                                open_image(self.asset(item))
+                            )
+                            migrated = True
+                        except (ValueError, OSError, DecompressionBombError) as exc:
+                            migration_warnings.append(str(exc))
+
+                previous_seen = len(self.data["seen"])
+                if not direct:
+                    self.scan()
+                self.warnings.extend(migration_warnings)
+                if migrated or previous_seen != len(self.data["seen"]):
                     self.save()
 
     def reload(self):
@@ -226,6 +243,27 @@ class Project:
         finally:
             tmp.unlink(missing_ok=True)
 
+    def store_image(self, path, suffix):
+        if suffix not in IMAGE_EXT or path.stat().st_size > MAX_FILE:
+            raise ValueError("Choose a supported image under 256 MiB.")
+        with path.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        target = self.assets / (digest + suffix)
+        if target.is_symlink():
+            raise ValueError("Invalid asset path.")
+        if not target.exists():
+            with tempfile.NamedTemporaryFile(dir=self.assets, delete=False) as out:
+                tmp = Path(out.name)
+            try:
+                shutil.copyfile(path, tmp)
+                image = open_image(tmp)
+                tmp.replace(target)
+            finally:
+                tmp.unlink(missing_ok=True)
+        else:
+            image = open_image(target)
+        return target, image
+
     def add(self, path, name, key, group=None):
         suffix = Path(name).suffix.lower()
         if suffix not in IMAGE_EXT | TEXT_EXT:
@@ -245,25 +283,14 @@ class Project:
                 raise ValueError("Essay is too large.")
             item["body"] = text_body(path.read_text("utf-8-sig"))
         else:
-            with path.open("rb") as stream:
-                digest = hashlib.file_digest(stream, "sha256").hexdigest()
-            target = self.assets / (digest + suffix)
-            if target.is_symlink():
-                raise ValueError("Invalid asset path.")
-            if not target.exists():
-                with tempfile.NamedTemporaryFile(dir=self.assets, delete=False) as out:
-                    tmp = Path(out.name)
-                try:
-                    shutil.copyfile(path, tmp)
-                    image = open_image(tmp)
-                    tmp.replace(target)
-                finally:
-                    tmp.unlink(missing_ok=True)
+            target, image = self.store_image(path, suffix)
+            if role == "comic":
+                item["panels"], crop = analyze(image)
             else:
-                image = open_image(target)
+                crop = auto_crop(image)
             item.update(
                 asset=target.name,
-                auto=auto_crop(image),
+                auto=crop,
                 crop=None,
                 fit="contain",
                 size=list(image.size),
@@ -316,7 +343,11 @@ class Project:
             }:
                 continue
             try:
-                added.append(self.add(path, path.name, key, group))
+                item = self.add(path, path.name, key, group)
+                if item["role"] == "essay" and self.same_essay(item):
+                    self.data["items"].pop()
+                    continue
+                added.append(item)
                 if paired_print:
                     book_prints.add(print_key)
             except (ValueError, OSError, DecompressionBombError) as exc:
@@ -325,6 +356,42 @@ class Project:
             previous = self.data["items"][: -len(added)]
             self.data["items"] = insert_items(previous, added)
         return added
+
+    def same_essay(self, item):
+        body = " ".join(item["body"].split())
+        return next(
+            (
+                old
+                for old in self.data["items"]
+                if old["id"] != item["id"]
+                and old["role"] == "essay"
+                and " ".join(old["body"].split()) == body
+            ),
+            None,
+        )
+
+    def essay_style(self, item, p):
+        item["font_size"] = (
+            number(p["font_size"], 7, 24) if p.get("font_size") else None
+        )
+        item["drop_cap"] = p.get("drop_cap", True) is True
+        item["image_width"] = number(p.get("image_width", 100), 10, 100)
+        item["image_side"] = p.get("image_side", "right")
+        item["image_fit"] = p.get("image_fit", "contain")
+        if item["image_side"] not in ("left", "right") or item["image_fit"] not in (
+            "contain",
+            "fill",
+        ):
+            raise ValueError("Choose an illustration position and framing.")
+        item["image_height"] = number(p.get("image_height", 38), 10, 70)
+        item["image_zoom"] = number(p.get("image_zoom", 100), 100, 250)
+        item["image_x"] = number(p.get("image_x", 50), 0, 100)
+        item["image_y"] = number(p.get("image_y", 50), 0, 100)
+        if "illustration" in p:
+            ref = p["illustration"]
+            if ref:
+                self.asset({"asset": ref, "title": "Essay illustration"})
+            item["illustration"] = ref
 
     def update(self, action, payload):
         with self.lock:
@@ -365,6 +432,11 @@ class Project:
                 "name": "",
                 "body": text_body(p["body"]),
             }
+            if self.same_essay(essay):
+                raise ValueError(
+                    "This essay is already in the issue. Select it and choose Edit essay."
+                )
+            self.essay_style(essay, p)
             self.data["items"] = insert_items(items, [essay])
         elif action == "upload":
             if (
@@ -373,6 +445,9 @@ class Project:
             ):
                 raise ValueError("Choose a cover image.")
             item = self.add(p["path"], p["name"], p["name"])
+            if item["role"] == "essay" and (prior := self.same_essay(item)):
+                items.pop()
+                return prior["id"]
             if p.get("role") == "cover":
                 # Reopen the same cover with its edits; interior pages keep their roles.
                 prior = next(
@@ -415,6 +490,7 @@ class Project:
                 item["title"] = title(p["title"])
                 if item["role"] == "essay":
                     item["body"] = text_body(p["body"])
+                    self.essay_style(item, {**item, **p})
                     return
                 role, fit, crop, rotate = p["role"], p["fit"], p["crop"], p["rotate"]
                 if (
@@ -432,6 +508,33 @@ class Project:
                         raise ValueError("Select a crop inside the artwork.")
                     if crop[2] - crop[0] < 0.005 or crop[3] - crop[1] < 0.005:
                         raise ValueError("Draw a larger crop.")
+                if role == "comic":
+                    mode = p.get("layout", item.get("layout", "auto"))
+                    if mode not in ("auto", "single", "2", "4", "10", "spread"):
+                        raise ValueError("Choose a comic layout.")
+                    item["layout"] = mode
+                    if "panels" in p:
+                        boxes = p["panels"]
+                        if not isinstance(boxes, list) or len(boxes) > 10:
+                            raise ValueError("Use up to ten panel rectangles.")
+                        for box in boxes:
+                            if (
+                                len(box) != 4
+                                or not all(number(v, 0, 1) >= 0 for v in box)
+                                or min(box[2] - box[0], box[3] - box[1]) < 0.005
+                            ):
+                                raise ValueError("Draw each panel inside the image.")
+                        if boxes != item.get("panels"):
+                            item["auto"] = (
+                                bounds(boxes)
+                                if boxes
+                                else auto_crop(open_image(self.asset(item)))
+                            )
+                        item["panels"] = boxes
+                    if "panels" not in item:
+                        item["panels"], item["auto"] = analyze(
+                            open_image(self.asset(item))
+                        )
                 old_role = item["role"]
                 item.update(role=role, fit=fit, crop=copy.copy(crop), rotate=rotate)
                 if role != old_role:

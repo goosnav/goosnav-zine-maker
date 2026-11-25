@@ -25,6 +25,8 @@ def notices(folder):
         "pypdfium2",
         "reportlab",
         "filelock",
+        "numpy",
+        "opencv-python-headless",
         "charset-normalizer",
         "pyinstaller",
     ):
@@ -84,6 +86,10 @@ def main():
             "This macOS build includes its runtime. It is ad-hoc signed and has not been notarized.\n"
         )
         notices(package / "Third-party notices")
+        shutil.copy2(
+            ROOT / "zinemaker/art/UnifrakturMaguntia-OFL.txt",
+            package / "Third-party notices",
+        )
         with (package / "checksums.sha256").open("w") as stream:
             for file in sorted(package.rglob("*")):
                 if file.is_file() and file.name != "checksums.sha256":
